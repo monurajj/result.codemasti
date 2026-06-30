@@ -7,16 +7,21 @@ import {
   renderElementToPdfFile,
   waitForPdfLayout,
 } from "@/lib/public-result-pdf";
-import type { PublicResultPayload } from "@/lib/types";
+import type { PublicResultPayload, PublicResultScoresPayload } from "@/lib/types";
+import { isPublicResultUnderReview } from "@/lib/types";
 import { PublicResultPdfSheet } from "./PublicResultPdfSheet";
 
 export function usePublicResultPdfDownload() {
   const pdfRef = useRef<HTMLDivElement>(null);
-  const [pdfData, setPdfData] = useState<PublicResultPayload | null>(null);
+  const [pdfData, setPdfData] = useState<PublicResultScoresPayload | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfMessage, setPdfMessage] = useState<string | null>(null);
 
   const download = useCallback(async (data: PublicResultPayload) => {
+    if (isPublicResultUnderReview(data)) {
+      alert("This result is under review. PDF download is not available yet.");
+      return;
+    }
     setPdfBusy(true);
     setPdfMessage("Preparing PDF…");
     try {

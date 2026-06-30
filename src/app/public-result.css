@@ -1227,6 +1227,78 @@ html:not(.dark) .pr-page .pr-attempt-metric-lbl {
   background: var(--cm-orange-hover);
 }
 
+.pr-attempt--under-review {
+  border-color: color-mix(in srgb, var(--cm-orange) 35%, var(--pr-border));
+}
+
+.pr-attempt-badge--review {
+  background: color-mix(in srgb, var(--cm-orange) 18%, transparent);
+  color: var(--cm-orange-hover);
+}
+
+.pr-attempt-review {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 1rem 1.1rem;
+  margin: 0 1.1rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--cm-orange) 10%, var(--pr-surface));
+  border: 1px solid color-mix(in srgb, var(--cm-orange) 22%, var(--pr-border));
+}
+
+.pr-attempt-review-ico {
+  flex-shrink: 0;
+  color: var(--cm-orange-hover);
+  margin-top: 0.1rem;
+}
+
+.pr-attempt-review-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--pr-text-muted);
+}
+
+.pr-card--review {
+  margin-top: 1.25rem;
+}
+
+.pr-review-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1.25rem 1rem;
+}
+
+.pr-review-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cm-orange) 14%, transparent);
+  color: var(--cm-orange-hover);
+}
+
+.pr-review-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--pr-text);
+}
+
+.pr-review-message {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 0.98rem;
+  line-height: 1.6;
+  color: var(--pr-text-muted);
+}
+
 @container attempt (max-width: 24rem) {
   .pr-attempt-score {
     grid-template-columns: 1fr;
