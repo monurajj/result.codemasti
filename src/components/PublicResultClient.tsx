@@ -41,7 +41,9 @@ import type {
   PublicAnswerRow,
   PublicResultPayload,
   PublicResultSummary,
+  PublicResultUnderReviewPayload,
 } from "@/lib/types";
+import { isPublicResultUnderReview, isSummaryUnderReview } from "@/lib/types";
 
 /** Official scholarship results portal — students verify with CST or email. */
 const CODEMASTI_SITE_URL = "https://codemasti.com";
@@ -186,7 +188,8 @@ function ResultAttemptCard({
   badgeLabel?: string;
   compact?: boolean;
 }) {
-  const pct = Math.min(100, Math.max(0, result.percentage));
+  const underReview = isSummaryUnderReview(result);
+  const pct = underReview ? 0 : Math.min(100, Math.max(0, result.percentage));
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -197,7 +200,7 @@ function ResultAttemptCard({
 
   return (
     <article
-      className="pr-attempt"
+      className={`pr-attempt${underReview ? " pr-attempt--under-review" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -214,68 +217,86 @@ function ResultAttemptCard({
           </div>
         </div>
         <div className="pr-attempt-head-actions">
-          <button
-            type="button"
-            className="pr-attempt-download"
-            title="Download result PDF"
-            aria-label="Download result PDF"
-            disabled={downloadBusy}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDownload();
-            }}
-          >
-            {downloadBusy ? <LoadingSpinner size={16} /> : <Download size={16} />}
-          </button>
-          <span className="pr-attempt-badge">{badgeLabel ?? result.attemptLabel}</span>
+          {!underReview ? (
+            <button
+              type="button"
+              className="pr-attempt-download"
+              title="Download result PDF"
+              aria-label="Download result PDF"
+              disabled={downloadBusy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload();
+              }}
+            >
+              {downloadBusy ? <LoadingSpinner size={16} /> : <Download size={16} />}
+            </button>
+          ) : null}
+          <span className={`pr-attempt-badge${underReview ? " pr-attempt-badge--review" : ""}`}>
+            {badgeLabel ?? result.attemptLabel}
+          </span>
         </div>
       </header>
 
-      <div className="pr-attempt-score">
-        <div className={`pr-attempt-pct ${scoreTierClass(pct)}`}>
-          <span className="pr-attempt-pct-val">{pct.toFixed(1)}%</span>
-          <span className="pr-attempt-pct-lbl">Overall</span>
-        </div>
-        <div className="pr-attempt-progress">
-          <div className="pr-attempt-progress-track">
-            <div className="pr-attempt-progress-fill" style={{ width: `${pct}%` }} />
-          </div>
-          <p className="pr-attempt-summary">
-            <span className="pr-attempt-summary-marks">
-              {result.marksObtained}/{result.totalMarks} marks
-            </span>
-            <span className="pr-attempt-summary-dot" aria-hidden>
-              ·
-            </span>
-            <span>{result.totalQuestions} questions</span>
+      {underReview ? (
+        <div className="pr-attempt-review">
+          <Info size={18} className="pr-attempt-review-ico" aria-hidden />
+          <p className="pr-attempt-review-text">
+            Your result is under review for now. Scores will appear here once our team completes
+            verification.
           </p>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="pr-attempt-score">
+            <div className={`pr-attempt-pct ${scoreTierClass(pct)}`}>
+              <span className="pr-attempt-pct-val">{pct.toFixed(1)}%</span>
+              <span className="pr-attempt-pct-lbl">Overall</span>
+            </div>
+            <div className="pr-attempt-progress">
+              <div className="pr-attempt-progress-track">
+                <div className="pr-attempt-progress-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="pr-attempt-summary">
+                <span className="pr-attempt-summary-marks">
+                  {result.marksObtained}/{result.totalMarks} marks
+                </span>
+                <span className="pr-attempt-summary-dot" aria-hidden>
+                  ·
+                </span>
+                <span>{result.totalQuestions} questions</span>
+              </p>
+            </div>
+          </div>
 
-      <div className="pr-attempt-metrics">
-        <div className="pr-attempt-metric">
-          <Target size={14} className="pr-attempt-metric-ico" aria-hidden />
-          <span className="pr-attempt-metric-lbl">Score</span>
-          <span className="pr-attempt-metric-val">
-            {result.marksObtained}/{result.totalMarks}
-          </span>
-        </div>
-        <div className="pr-attempt-metric">
-          <Percent size={14} className="pr-attempt-metric-ico" aria-hidden />
-          <span className="pr-attempt-metric-lbl">Percentage</span>
-          <span className="pr-attempt-metric-val">{pct.toFixed(2)}%</span>
-        </div>
-        <div className="pr-attempt-metric pr-attempt-metric--wide">
-          <Calendar size={14} className="pr-attempt-metric-ico" aria-hidden />
-          <span className="pr-attempt-metric-lbl">Finished</span>
-          <span className="pr-attempt-metric-val pr-attempt-metric-val--date">
-            {formatWhen(result.finishedAt)}
-          </span>
-        </div>
-      </div>
+          <div className="pr-attempt-metrics">
+            <div className="pr-attempt-metric">
+              <Target size={14} className="pr-attempt-metric-ico" aria-hidden />
+              <span className="pr-attempt-metric-lbl">Score</span>
+              <span className="pr-attempt-metric-val">
+                {result.marksObtained}/{result.totalMarks}
+              </span>
+            </div>
+            <div className="pr-attempt-metric">
+              <Percent size={14} className="pr-attempt-metric-ico" aria-hidden />
+              <span className="pr-attempt-metric-lbl">Percentage</span>
+              <span className="pr-attempt-metric-val">{pct.toFixed(2)}%</span>
+            </div>
+            <div className="pr-attempt-metric pr-attempt-metric--wide">
+              <Calendar size={14} className="pr-attempt-metric-ico" aria-hidden />
+              <span className="pr-attempt-metric-lbl">Finished</span>
+              <span className="pr-attempt-metric-val pr-attempt-metric-val--date">
+                {formatWhen(result.finishedAt)}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
       <footer className="pr-attempt-action">
-        <span className="pr-attempt-action-lbl">View full result</span>
+        <span className="pr-attempt-action-lbl">
+          {underReview ? "View review status" : "View full result"}
+        </span>
         <span className="pr-attempt-action-ico" aria-hidden>
           <ArrowRight size={16} strokeWidth={2.5} />
         </span>
@@ -455,6 +476,56 @@ function ScoreRing({ percentage }: { percentage: number }) {
   );
 }
 
+function ResultUnderReviewView({
+  data,
+  onBack,
+  showBack,
+}: {
+  data: PublicResultUnderReviewPayload;
+  onBack?: () => void;
+  showBack: boolean;
+}) {
+  return (
+    <PageShell>
+      <div className="pr-detail-page">
+        {showBack && onBack && (
+          <button type="button" className="pr-back-btn" onClick={onBack}>
+            <ChevronLeft size={18} />
+            All attempts
+          </button>
+        )}
+        <CodeMastiBrandHeader
+          title={data.studentName}
+          subtitle={data.testName}
+          cstNumber={data.cstNumber}
+        />
+
+        <section className="pr-card pr-card--review">
+          <div className="pr-review-hero">
+            <div className="pr-review-icon" aria-hidden>
+              <Info size={28} strokeWidth={2} />
+            </div>
+            <h2 className="pr-review-title">Result under review</h2>
+            <p className="pr-review-message">{data.message}</p>
+          </div>
+          <div className="pr-meta pr-meta--detail">
+            <div>
+              <span>Submitted</span>
+              <strong>{formatWhen(data.finishedAt)}</strong>
+            </div>
+            {data.startedAt ? (
+              <div>
+                <span>Started</span>
+                <strong>{formatWhen(data.startedAt)}</strong>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
+    </PageShell>
+  );
+}
+
 function ResultDetailView({
   data,
   onBack,
@@ -462,7 +533,7 @@ function ResultDetailView({
   onDownload,
   downloadBusy,
 }: {
-  data: PublicResultPayload;
+  data: Extract<PublicResultPayload, { publicationStatus?: "scores" }>;
   onBack?: () => void;
   showBack: boolean;
   onDownload: () => void;
@@ -1555,7 +1626,7 @@ function PublicResultView() {
 
   const handleDownloadAttempt = useCallback(
     async (summary: PublicResultSummary) => {
-      if (pdfBusy || downloadingId) return;
+      if (pdfBusy || downloadingId || isSummaryUnderReview(summary)) return;
       setDownloadingId(summary.resultId);
       try {
         const payload = await fetchResultPayload(cstNumber, summary.resultId, accessToken);
@@ -1570,7 +1641,7 @@ function PublicResultView() {
   );
 
   const handleDownloadDetail = useCallback(() => {
-    if (detail) void downloadPdf(detail);
+    if (detail && !isPublicResultUnderReview(detail)) void downloadPdf(detail);
   }, [detail, downloadPdf]);
 
   if (!normalizeCstInput(cstParam)) {
@@ -1636,6 +1707,18 @@ function PublicResultView() {
   }
 
   if (mode === "detail" && detail) {
+    if (isPublicResultUnderReview(detail)) {
+      return (
+        <ResultUnderReviewView
+          data={detail}
+          showBack={results.length > 1}
+          onBack={() => {
+            router.push(resultUrl({ list: true }));
+          }}
+        />
+      );
+    }
+
     return (
       <>
         {pdfPortal}

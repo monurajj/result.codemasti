@@ -1,5 +1,5 @@
 import type { CSSProperties, RefObject } from "react";
-import type { PublicResultPayload } from "@/lib/types";
+import type { OptionItem, PublicAnswerRow, PublicResultScoresPayload } from "@/lib/types";
 
 const CODEMASTI_SITE_URL = "https://codemasti.com";
 const CODEMASTI_SUPPORT_EMAIL = "support@codemati.com";
@@ -63,7 +63,7 @@ const sheetStyle: CSSProperties = {
 };
 
 type Props = {
-  data: PublicResultPayload;
+  data: PublicResultScoresPayload;
   innerRef: RefObject<HTMLDivElement | null>;
 };
 
@@ -225,7 +225,7 @@ export function PublicResultPdfSheet({ data, innerRef }: Props) {
         </div>
 
         <ol style={{ margin: 0, paddingLeft: 18 }}>
-          {data.answers.map((row) => {
+          {data.answers.map((row: PublicAnswerRow) => {
             const q = data.questions[row.index];
             if (!q) return null;
             const maxMarks = row.maxMarks ?? q.marks ?? 1;
@@ -285,7 +285,7 @@ export function PublicResultPdfSheet({ data, innerRef }: Props) {
 
                 {q.questionType === "multiple_choice" || q.questionType === "image_choice" ? (
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-                    {q.options.map((opt, oidx) => {
+                    {q.options.map((opt: OptionItem, oidx: number) => {
                       const isSelected =
                         typeof row.selected === "number" && row.selected === oidx;
                       const isCorr = typeof row.correct === "number" && row.correct === oidx;

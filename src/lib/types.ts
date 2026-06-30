@@ -31,6 +31,8 @@ export type PublicAnswerRow = {
   correctLabel: string;
 };
 
+export type ResultPublicationStatus = "scores" | "under_review";
+
 export type PublicResultSummary = {
   resultId: string;
   testId: string;
@@ -45,9 +47,11 @@ export type PublicResultSummary = {
   finishedAt: string;
   sessionDurationSeconds: number | null;
   attemptLabel: string;
+  publicationStatus?: ResultPublicationStatus;
 };
 
-export type PublicResultPayload = {
+export type PublicResultScoresPayload = {
+  publicationStatus?: "scores";
   resultId: string;
   studentName: string;
   testName: string;
@@ -63,3 +67,26 @@ export type PublicResultPayload = {
   questions: PublicQuestion[];
   answers: PublicAnswerRow[];
 };
+
+export type PublicResultUnderReviewPayload = {
+  publicationStatus: "under_review";
+  resultId: string;
+  studentName: string;
+  testName: string;
+  cstNumber: string;
+  startedAt: string;
+  finishedAt: string;
+  message: string;
+};
+
+export type PublicResultPayload = PublicResultScoresPayload | PublicResultUnderReviewPayload;
+
+export function isPublicResultUnderReview(
+  payload: PublicResultPayload,
+): payload is PublicResultUnderReviewPayload {
+  return payload.publicationStatus === "under_review";
+}
+
+export function isSummaryUnderReview(summary: PublicResultSummary): boolean {
+  return summary.publicationStatus === "under_review";
+}
