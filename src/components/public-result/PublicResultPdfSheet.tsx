@@ -180,13 +180,6 @@ export function PublicResultPdfSheet({ data, innerRef }: Props) {
               {correctCount} / {data.totalQuestions}
             </strong>
           </div>
-          {data.percentile !== null ? (
-            <div>
-              <span style={{ color: brand.textMuted }}>Percentile</span>
-              <br />
-              <strong>{data.percentile.toFixed(2)}%</strong>
-            </div>
-          ) : null}
           <div>
             <span style={{ color: brand.textMuted }}>Finished</span>
             <br />

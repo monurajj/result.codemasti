@@ -41,9 +41,9 @@ import type {
   PublicAnswerRow,
   PublicResultPayload,
   PublicResultSummary,
-  PublicResultUnderReviewPayload,
+  PublicResultWithheldPayload,
 } from "@/lib/types";
-import { isPublicResultUnderReview, isSummaryUnderReview } from "@/lib/types";
+import { isPublicResultWithheld, isSummaryWithheld } from "@/lib/types";
 
 /** Official scholarship results portal — students verify with CST or email. */
 const CODEMASTI_SITE_URL = "https://codemasti.com";
@@ -102,25 +102,75 @@ function formatResultMonthLabel(monthKey: string) {
 
 function buildResultFilterOptions(results: PublicResultSummary[]) {
   const monthMap = new Map<string, string>();
-  const testMap = new Map<string, string>();
+  const attemptedTests = new Map<string, { label: string; latestFinishedAt: number }>();
+  const filterableTestIds = new Set<string>();
+
+  for (const result of results) {
+    const testId = result.testId?.trim();
+    if (!testId) continue;
+    if (result.publicationStatus !== "awaiting_release") {
+      filterableTestIds.add(testId);
+    }
+  }
 
   for (const result of results) {
     const monthKey = getResultMonthKey(result.finishedAt);
     if (monthKey) monthMap.set(monthKey, formatResultMonthLabel(monthKey));
 
-    const testKey = result.testId || result.testName;
-    if (testKey) testMap.set(testKey, result.testName || "Scholarship test");
+    const testId = result.testId?.trim();
+    if (!testId || !filterableTestIds.has(testId)) continue;
+
+    const finishedAt = Date.parse(result.finishedAt) || 0;
+    const label = result.testName?.trim() || "Scholarship test";
+    const existing = attemptedTests.get(testId);
+    if (!existing || finishedAt > existing.latestFinishedAt) {
+      attemptedTests.set(testId, { label, latestFinishedAt: finishedAt });
+    }
   }
 
   const months = Array.from(monthMap.entries())
     .sort(([a], [b]) => b.localeCompare(a))
     .map(([value, label]) => ({ value, label }));
 
-  const tests = Array.from(testMap.entries())
-    .sort(([, a], [, b]) => a.localeCompare(b))
-    .map(([value, label]) => ({ value, label }));
+  const tests = Array.from(attemptedTests.entries())
+    .sort(([, a], [, b]) => b.latestFinishedAt - a.latestFinishedAt)
+    .map(([value, { label }]) => ({ value, label }));
 
   return { months, tests };
+}
+
+const PAST_FLAT_PAGE_SIZE = 10;
+const PAST_GROUPS_PAGE_SIZE = 5;
+/** Group past attempts by test when the list is long and not filtered to one test. */
+const GROUP_PAST_THRESHOLD = 8;
+
+type ResultTestGroup = {
+  key: string;
+  testName: string;
+  attempts: PublicResultSummary[];
+};
+
+function groupResultsByTest(results: PublicResultSummary[]): ResultTestGroup[] {
+  const byTest = new Map<string, PublicResultSummary[]>();
+
+  for (const result of results) {
+    const key = result.testId?.trim() || result.testName;
+    const list = byTest.get(key) ?? [];
+    list.push(result);
+    byTest.set(key, list);
+  }
+
+  return Array.from(byTest.entries())
+    .map(([key, attempts]) => ({
+      key,
+      testName: attempts[0]?.testName ?? "Scholarship test",
+      attempts,
+    }))
+    .sort(
+      (a, b) =>
+        (Date.parse(b.attempts[0]?.finishedAt ?? "") || 0) -
+        (Date.parse(a.attempts[0]?.finishedAt ?? "") || 0),
+    );
 }
 
 function filterResults(
@@ -131,11 +181,18 @@ function filterResults(
   return results.filter((result) => {
     if (monthFilter && getResultMonthKey(result.finishedAt) !== monthFilter) return false;
     if (testFilter) {
-      const testKey = result.testId || result.testName;
-      if (testKey !== testFilter) return false;
+      const testId = result.testId?.trim();
+      if (!testId || testId !== testFilter) return false;
     }
     return true;
   });
+}
+
+function toggleSetItem(set: Set<string>, item: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(item)) next.delete(item);
+  else next.add(item);
+  return next;
 }
 
 function normalizeCstInput(raw: string) {
@@ -188,8 +245,8 @@ function ResultAttemptCard({
   badgeLabel?: string;
   compact?: boolean;
 }) {
-  const underReview = isSummaryUnderReview(result);
-  const pct = underReview ? 0 : Math.min(100, Math.max(0, result.percentage));
+  const withheld = isSummaryWithheld(result);
+  const pct = withheld ? 0 : Math.min(100, Math.max(0, result.percentage));
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -200,7 +257,7 @@ function ResultAttemptCard({
 
   return (
     <article
-      className={`pr-attempt${underReview ? " pr-attempt--under-review" : ""}`}
+      className={`pr-attempt${withheld ? " pr-attempt--under-review" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -217,7 +274,7 @@ function ResultAttemptCard({
           </div>
         </div>
         <div className="pr-attempt-head-actions">
-          {!underReview ? (
+          {!withheld ? (
             <button
               type="button"
               className="pr-attempt-download"
@@ -232,18 +289,19 @@ function ResultAttemptCard({
               {downloadBusy ? <LoadingSpinner size={16} /> : <Download size={16} />}
             </button>
           ) : null}
-          <span className={`pr-attempt-badge${underReview ? " pr-attempt-badge--review" : ""}`}>
+          <span className={`pr-attempt-badge${withheld ? " pr-attempt-badge--review" : ""}`}>
             {badgeLabel ?? result.attemptLabel}
           </span>
         </div>
       </header>
 
-      {underReview ? (
+      {withheld ? (
         <div className="pr-attempt-review">
           <Info size={18} className="pr-attempt-review-ico" aria-hidden />
           <p className="pr-attempt-review-text">
-            Your result is under review for now. Scores will appear here once our team completes
-            verification.
+            {result.publicationStatus === "awaiting_release"
+              ? "Results for this test have not been released yet. They will appear here once the academic team releases them."
+              : "Your result is under review for now. Scores will appear here once our team completes verification."}
           </p>
         </div>
       ) : (
@@ -295,7 +353,7 @@ function ResultAttemptCard({
 
       <footer className="pr-attempt-action">
         <span className="pr-attempt-action-lbl">
-          {underReview ? "View review status" : "View full result"}
+          {withheld ? "View status" : "View full result"}
         </span>
         <span className="pr-attempt-action-ico" aria-hidden>
           <ArrowRight size={16} strokeWidth={2.5} />
@@ -476,15 +534,20 @@ function ScoreRing({ percentage }: { percentage: number }) {
   );
 }
 
-function ResultUnderReviewView({
+function ResultWithheldView({
   data,
   onBack,
   showBack,
 }: {
-  data: PublicResultUnderReviewPayload;
+  data: PublicResultWithheldPayload;
   onBack?: () => void;
   showBack: boolean;
 }) {
+  const title =
+    data.publicationStatus === "awaiting_release"
+      ? "Result not released yet"
+      : "Result under review";
+
   return (
     <PageShell>
       <div className="pr-detail-page">
@@ -505,7 +568,7 @@ function ResultUnderReviewView({
             <div className="pr-review-icon" aria-hidden>
               <Info size={28} strokeWidth={2} />
             </div>
-            <h2 className="pr-review-title">Result under review</h2>
+            <h2 className="pr-review-title">{title}</h2>
             <p className="pr-review-message">{data.message}</p>
           </div>
           <div className="pr-meta pr-meta--detail">
@@ -608,15 +671,6 @@ function ResultDetailView({
                 </strong>
               </div>
             )}
-            <div className="pr-score-item">
-              <span>
-                <span className="pr-score-item-label-full">Percentile</span>
-                <span className="pr-score-item-label-short">Rank</span>
-              </span>
-              <strong>
-                {data.percentile !== null ? `${data.percentile.toFixed(1)}%` : "—"}
-              </strong>
-            </div>
           </div>
         </div>
         <div className="pr-meta pr-meta--detail">
@@ -827,6 +881,88 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function PastResultsGrouped({
+  groups,
+  expandedGroups,
+  onToggleGroup,
+  onSelect,
+  onDownloadAttempt,
+  downloadingId,
+}: {
+  groups: ResultTestGroup[];
+  expandedGroups: Set<string>;
+  onToggleGroup: (key: string) => void;
+  onSelect: (resultId: string) => void;
+  onDownloadAttempt: (summary: PublicResultSummary) => void;
+  downloadingId: string | null;
+}) {
+  return (
+    <div className="pr-test-groups">
+      {groups.map((group) => {
+        const expanded = expandedGroups.has(group.key);
+        const [lead, ...older] = group.attempts;
+        if (!lead) return null;
+
+        return (
+          <div key={group.key} className="pr-test-group">
+            <div className="pr-test-group-head">
+              <h3 className="pr-test-group-title">{group.testName}</h3>
+              <span className="pr-test-group-count">
+                {group.attempts.length} attempt{group.attempts.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="pr-attempt-grid pr-attempt-grid--group">
+              <ResultAttemptCard
+                key={lead.resultId}
+                result={lead}
+                compact
+                badgeLabel={formatWhenBadge(lead.finishedAt)}
+                onSelect={() => onSelect(lead.resultId)}
+                onDownload={() => onDownloadAttempt(lead)}
+                downloadBusy={downloadingId === lead.resultId}
+              />
+              {expanded
+                ? older.map((r, index) => (
+                    <ResultAttemptCard
+                      key={r.resultId}
+                      result={r}
+                      compact
+                      badgeLabel={
+                        formatWhenBadge(r.finishedAt) !== "—"
+                          ? formatWhenBadge(r.finishedAt)
+                          : `Older ${index + 1}`
+                      }
+                      onSelect={() => onSelect(r.resultId)}
+                      onDownload={() => onDownloadAttempt(r)}
+                      downloadBusy={downloadingId === r.resultId}
+                    />
+                  ))
+                : null}
+            </div>
+            {older.length > 0 ? (
+              <button
+                type="button"
+                className="pr-test-group-toggle"
+                onClick={() => onToggleGroup(group.key)}
+                aria-expanded={expanded}
+              >
+                <ChevronDown
+                  size={16}
+                  className={`pr-test-group-toggle-ico${expanded ? " pr-test-group-toggle-ico--open" : ""}`}
+                  aria-hidden
+                />
+                {expanded
+                  ? `Hide ${older.length} older attempt${older.length === 1 ? "" : "s"}`
+                  : `Show ${older.length} older attempt${older.length === 1 ? "" : "s"}`}
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResultListView({
   cstNumber,
   studentName,
@@ -844,9 +980,26 @@ function ResultListView({
 }) {
   const [monthFilter, setMonthFilter] = useState("");
   const [testFilter, setTestFilter] = useState("");
+  const [pastFlatPage, setPastFlatPage] = useState(1);
+  const [pastGroupsPage, setPastGroupsPage] = useState(1);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
 
   const { months, tests } = useMemo(() => buildResultFilterOptions(results), [results]);
-  const showFilters = results.length > 1 && (months.length > 1 || tests.length > 1);
+  const showMonthFilter = months.length > 1;
+  const showTestFilter = tests.length > 1;
+  const showFilters = results.length > 1 && (showMonthFilter || showTestFilter);
+
+  useEffect(() => {
+    if (testFilter && !tests.some((test) => test.value === testFilter)) {
+      setTestFilter("");
+    }
+  }, [tests, testFilter]);
+
+  useEffect(() => {
+    setPastFlatPage(1);
+    setPastGroupsPage(1);
+    setExpandedGroups(new Set());
+  }, [monthFilter, testFilter, results.length]);
 
   const filteredResults = useMemo(
     () => filterResults(results, monthFilter, testFilter),
@@ -856,6 +1009,15 @@ function ResultListView({
   const filtersActive = Boolean(monthFilter || testFilter);
   const latest = filteredResults[0] ?? null;
   const past = filteredResults.slice(1);
+  const useGroupedPast = !testFilter && past.length >= GROUP_PAST_THRESHOLD;
+  const pastGroups = useMemo(
+    () => (useGroupedPast ? groupResultsByTest(past) : []),
+    [useGroupedPast, past],
+  );
+  const visiblePastGroups = pastGroups.slice(0, pastGroupsPage * PAST_GROUPS_PAGE_SIZE);
+  const hasMorePastGroups = visiblePastGroups.length < pastGroups.length;
+  const visibleFlatPast = past.slice(0, pastFlatPage * PAST_FLAT_PAGE_SIZE);
+  const hasMoreFlatPast = visibleFlatPast.length < past.length;
 
   const clearFilters = () => {
     setMonthFilter("");
@@ -899,8 +1061,8 @@ function ResultListView({
         <Info size={18} className="pr-list-banner-ico" aria-hidden />
         <p>
           <span className="pr-list-banner-long">
-            Your most recent attempt is shown first. Select any test below to view the full score,
-            percentile, and answer breakdown.
+            Your most recent attempt is shown first. Select any test below to view the full score
+            and answer breakdown.
           </span>
           <span className="pr-list-banner-short">
             Latest attempt first — tap a card for full score and answers.
@@ -910,10 +1072,11 @@ function ResultListView({
 
       {showFilters ? (
         <div
-          className={`pr-results-filters${months.length > 0 && tests.length > 0 ? " pr-results-filters--dual" : ""}`}
+          className={`pr-results-filters${showMonthFilter && showTestFilter ? " pr-results-filters--dual" : ""}`}
           role="group"
           aria-label="Filter results"
         >
+          {showMonthFilter ? (
           <div className="pr-results-filter">
             <label className="pr-results-filter-label" htmlFor="pr-filter-month">
               <Calendar size={15} aria-hidden />
@@ -936,7 +1099,9 @@ function ResultListView({
               <ChevronDown size={16} className="pr-results-filter-chevron" aria-hidden />
             </div>
           </div>
+          ) : null}
 
+          {showTestFilter ? (
           <div className="pr-results-filter">
             <label className="pr-results-filter-label" htmlFor="pr-filter-test">
               <ClipboardList size={15} aria-hidden />
@@ -959,6 +1124,7 @@ function ResultListView({
               <ChevronDown size={16} className="pr-results-filter-chevron" aria-hidden />
             </div>
           </div>
+          ) : null}
 
           {filtersActive ? (
             <button type="button" className="pr-results-filter-clear" onClick={clearFilters}>
@@ -1017,23 +1183,59 @@ function ResultListView({
                 {filtersActive ? "More results" : "Past results"}{" "}
                 <span className="pr-results-section-count">({past.length})</span>
               </h2>
-              <div className="pr-attempt-grid">
-                {past.map((r, index) => (
-                  <ResultAttemptCard
-                    key={r.resultId}
-                    result={r}
-                    compact
-                    badgeLabel={
-                      formatWhenBadge(r.finishedAt) !== "—"
-                        ? formatWhenBadge(r.finishedAt)
-                        : `Past ${index + 1}`
+
+              {useGroupedPast ? (
+                <>
+                  <PastResultsGrouped
+                    groups={visiblePastGroups}
+                    expandedGroups={expandedGroups}
+                    onToggleGroup={(key) =>
+                      setExpandedGroups((prev) => toggleSetItem(prev, key))
                     }
-                    onSelect={() => onSelect(r.resultId)}
-                    onDownload={() => onDownloadAttempt(r)}
-                    downloadBusy={downloadingId === r.resultId}
+                    onSelect={onSelect}
+                    onDownloadAttempt={onDownloadAttempt}
+                    downloadingId={downloadingId}
                   />
-                ))}
-              </div>
+                  {hasMorePastGroups ? (
+                    <button
+                      type="button"
+                      className="pr-past-load-more"
+                      onClick={() => setPastGroupsPage((page) => page + 1)}
+                    >
+                      Load more tests
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="pr-attempt-grid">
+                    {visibleFlatPast.map((r, index) => (
+                      <ResultAttemptCard
+                        key={r.resultId}
+                        result={r}
+                        compact
+                        badgeLabel={
+                          formatWhenBadge(r.finishedAt) !== "—"
+                            ? formatWhenBadge(r.finishedAt)
+                            : `Past ${index + 1}`
+                        }
+                        onSelect={() => onSelect(r.resultId)}
+                        onDownload={() => onDownloadAttempt(r)}
+                        downloadBusy={downloadingId === r.resultId}
+                      />
+                    ))}
+                  </div>
+                  {hasMoreFlatPast ? (
+                    <button
+                      type="button"
+                      className="pr-past-load-more"
+                      onClick={() => setPastFlatPage((page) => page + 1)}
+                    >
+                      Load more attempts
+                    </button>
+                  ) : null}
+                </>
+              )}
             </section>
           ) : null}
         </>
@@ -1106,7 +1308,7 @@ function ResultLookupPage({
     <PageShell>
       <CodeMastiBrandHeader
         title="View your results"
-        subtitle="Enter your CST number or registered email. Published results appear here after review by the CodeMasti team."
+        subtitle="Enter your CST number or registered email. Results appear here after review by the CodeMasti academic team."
       />
 
       <div className="pr-lookup-panel">
@@ -1204,8 +1406,8 @@ function ResultLookupPage({
         )}
 
         <p className="pr-cst-hint pr-lookup-note">
-          Results are released from the admin panel after your test is reviewed. If you recently
-          completed a test, check back here once they are published.
+          Results are released by the academic team after your test is reviewed. If you recently
+          completed a test, check back here once they are available.
         </p>
       </div>
     </PageShell>
@@ -1449,7 +1651,7 @@ function ResultVerificationGate({
         )}
         {error ? <p className="pr-error-inline">{error}</p> : null}
         <p className="pr-cst-hint">
-          Once verified, you can view all published attempts — your latest result first, then past
+          Once verified, you can view all your test attempts — your latest result first, then past
           results.
         </p>
         </div>
@@ -1479,6 +1681,8 @@ function PublicResultView() {
   const [accessToken, setAccessToken] = useState("");
   const [studentName, setStudentName] = useState("");
   const [results, setResults] = useState<PublicResultSummary[]>([]);
+  const resultsRef = useRef<PublicResultSummary[]>([]);
+  resultsRef.current = results;
   const [detail, setDetail] = useState<PublicResultPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(normalizeCstInput(cstParam)));
@@ -1512,6 +1716,16 @@ function PublicResultView() {
       setError(null);
       setCstNumber(normalized);
 
+      const cachedList = resultsRef.current;
+      const trimmedResultId = resultId.trim();
+
+      if (!trimmedResultId && cachedList.length > 0) {
+        setDetail(null);
+        setMode("list");
+        setLoading(false);
+        return;
+      }
+
       try {
         const params = new URLSearchParams({
           cst: normalized,
@@ -1519,8 +1733,14 @@ function PublicResultView() {
           redirect: "0",
           accessToken: token,
         });
-        if (resultId) params.set("id", resultId);
-        else params.set("list", "1");
+        if (trimmedResultId) {
+          params.set("id", trimmedResultId);
+          if (cachedList.length > 0) {
+            params.set("includeList", "0");
+          }
+        } else {
+          params.set("list", "1");
+        }
 
         const res = await fetch(apiUrl(`/api/scholarship-test/public/result?${params}`), {
           cache: "no-store",
@@ -1537,12 +1757,15 @@ function PublicResultView() {
 
         storeResultAccessToken(normalized, token);
 
-        setStudentName(json.studentName ?? json.result?.studentName ?? "");
+        setStudentName(
+          json.studentName ?? json.result?.studentName ?? cachedList[0]?.studentName ?? "",
+        );
 
         if (json.mode === "detail" && json.result) {
           setDetail(json.result as PublicResultPayload);
-          const siblings = (json.results as PublicResultSummary[] | undefined) ?? [];
-          setResults(siblings);
+          if (Array.isArray(json.results) && json.results.length > 0) {
+            setResults(json.results as PublicResultSummary[]);
+          }
           setMode("detail");
           return;
         }
@@ -1556,8 +1779,10 @@ function PublicResultView() {
 
         throw new Error("Unexpected response from server");
       } catch (e) {
-        setDetail(null);
-        setResults([]);
+        if (!trimmedResultId || cachedList.length === 0) {
+          setDetail(null);
+          setResults([]);
+        }
         setError(e instanceof Error ? e.message : "Failed to load results");
         setMode("error");
       } finally {
@@ -1595,6 +1820,7 @@ function PublicResultView() {
         format: "json",
         redirect: "0",
         accessToken: token,
+        includeList: "0",
       });
       const res = await fetch(apiUrl(`/api/scholarship-test/public/result?${params}`), {
         cache: "no-store",
@@ -1626,7 +1852,7 @@ function PublicResultView() {
 
   const handleDownloadAttempt = useCallback(
     async (summary: PublicResultSummary) => {
-      if (pdfBusy || downloadingId || isSummaryUnderReview(summary)) return;
+      if (pdfBusy || downloadingId || isSummaryWithheld(summary)) return;
       setDownloadingId(summary.resultId);
       try {
         const payload = await fetchResultPayload(cstNumber, summary.resultId, accessToken);
@@ -1641,7 +1867,7 @@ function PublicResultView() {
   );
 
   const handleDownloadDetail = useCallback(() => {
-    if (detail && !isPublicResultUnderReview(detail)) void downloadPdf(detail);
+    if (detail && !isPublicResultWithheld(detail)) void downloadPdf(detail);
   }, [detail, downloadPdf]);
 
   if (!normalizeCstInput(cstParam)) {
@@ -1687,12 +1913,12 @@ function PublicResultView() {
     return (
       <PageShell>
         <CodeMastiBrandHeader
-          title={isNoResults ? "No published results yet" : "Could not load results"}
+          title={isNoResults ? "No results yet" : "Could not load results"}
         />
         <div className="pr-error-card">
           <p>
             {isNoResults
-              ? "There are no published results for this account right now. Results are released from the admin panel after review — please check back later or contact support if you believe this is an error."
+              ? "There are no results for this account right now. Results are released by the academic team after review — please check back later or contact support if you believe this is an error."
               : error}
           </p>
           <a
@@ -1707,9 +1933,9 @@ function PublicResultView() {
   }
 
   if (mode === "detail" && detail) {
-    if (isPublicResultUnderReview(detail)) {
+    if (isPublicResultWithheld(detail)) {
       return (
-        <ResultUnderReviewView
+        <ResultWithheldView
           data={detail}
           showBack={results.length > 1}
           onBack={() => {
