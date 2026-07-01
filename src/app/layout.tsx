@@ -20,8 +20,8 @@ export const metadata: Metadata = {
   description:
     "View your CodeMasti scholarship test score and answer breakdown using your CST number.",
   icons: {
-    icon: "/text-logo.png",
-    apple: "/text-logo.png",
+    icon: "/logo.png",
+    apple: "/logo.png",
   },
 };
 

@@ -31,7 +31,7 @@ export type PublicAnswerRow = {
   correctLabel: string;
 };
 
-export type ResultPublicationStatus = "scores" | "under_review";
+export type ResultPublicationStatus = "scores" | "under_review" | "awaiting_release";
 
 export type PublicResultSummary = {
   resultId: string;
@@ -68,8 +68,8 @@ export type PublicResultScoresPayload = {
   answers: PublicAnswerRow[];
 };
 
-export type PublicResultUnderReviewPayload = {
-  publicationStatus: "under_review";
+export type PublicResultWithheldPayload = {
+  publicationStatus: "under_review" | "awaiting_release";
   resultId: string;
   studentName: string;
   testName: string;
@@ -79,14 +79,35 @@ export type PublicResultUnderReviewPayload = {
   message: string;
 };
 
-export type PublicResultPayload = PublicResultScoresPayload | PublicResultUnderReviewPayload;
+export type PublicResultUnderReviewPayload = Extract<
+  PublicResultWithheldPayload,
+  { publicationStatus: "under_review" }
+>;
+
+export type PublicResultPayload = PublicResultScoresPayload | PublicResultWithheldPayload;
+
+export function isPublicResultWithheld(
+  payload: PublicResultPayload,
+): payload is PublicResultWithheldPayload {
+  return (
+    payload.publicationStatus === "under_review" ||
+    payload.publicationStatus === "awaiting_release"
+  );
+}
 
 export function isPublicResultUnderReview(
   payload: PublicResultPayload,
-): payload is PublicResultUnderReviewPayload {
-  return payload.publicationStatus === "under_review";
+): payload is PublicResultWithheldPayload {
+  return isPublicResultWithheld(payload);
+}
+
+export function isSummaryWithheld(summary: PublicResultSummary): boolean {
+  return (
+    summary.publicationStatus === "under_review" ||
+    summary.publicationStatus === "awaiting_release"
+  );
 }
 
 export function isSummaryUnderReview(summary: PublicResultSummary): boolean {
-  return summary.publicationStatus === "under_review";
+  return isSummaryWithheld(summary);
 }
